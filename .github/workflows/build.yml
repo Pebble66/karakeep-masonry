@@ -1,0 +1,195 @@
+name: Build masonry image
+
+on:
+  schedule:
+    # Daily check for a new Karakeep release
+    - cron: "23 4 * * *"
+  push:
+    branches: [main]
+    paths:
+      - "patches/**"
+      - ".github/workflows/build.yml"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Karakeep release tag to build, e.g. v0.33.2 (empty = latest release)"
+        required: false
+        default: ""
+      force:
+        description: "Rebuild even if this version was already built"
+        type: boolean
+        default: false
+
+concurrency:
+  group: build-masonry-image
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+      tags: ${{ steps.release.outputs.tags }}
+      skip: ${{ steps.check.outputs.skip }}
+    steps:
+      - name: Resolve Karakeep release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          api=repos/karakeep-app/karakeep/releases
+          latest_tag=$(gh api "$api/latest" --jq .tag_name)
+          tag="${INPUT_TAG:-$latest_tag}"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Unexpected release tag '$tag'"
+            exit 1
+          fi
+          # Upstream uses the release name (e.g. "0.33.2") as the version
+          version=$(gh api "$api/tags/$tag" --jq .name)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || version="${tag#v}"
+
+          image="ghcr.io/${OWNER,,}/karakeep-masonry"
+          tags="$image:$version"
+          # Only move the "release" tag when building the newest release
+          if [[ "$tag" == "$latest_tag" ]]; then
+            tags+=",$image:release"
+          fi
+
+          {
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "image=$image"
+            echo "tags=$tags"
+          } >> "$GITHUB_OUTPUT"
+          echo "Building Karakeep $tag (latest release: $latest_tag) as $tags"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Check whether this version is already built
+        id: check
+        env:
+          IMAGE: ${{ steps.release.outputs.image }}
+          VERSION: ${{ steps.release.outputs.version }}
+          ALWAYS_BUILD: ${{ github.event_name == 'push' || inputs.force == true }}
+        run: |
+          if [[ "$ALWAYS_BUILD" != "true" ]] && docker manifest inspect "$IMAGE:$VERSION" > /dev/null 2>&1; then
+            echo "$IMAGE:$VERSION already exists, nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: resolve
+    if: needs.resolve.outputs.skip == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out this repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          path: build
+          persist-credentials: false
+
+      - name: Check out Karakeep ${{ needs.resolve.outputs.tag }}
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          repository: karakeep-app/karakeep
+          ref: ${{ needs.resolve.outputs.tag }}
+          path: karakeep
+          persist-credentials: false
+
+      - name: Apply masonry patch
+        working-directory: karakeep
+        env:
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          if ! git apply --check ../build/patches/masonry.patch; then
+            echo "::error title=Patch no longer applies::masonry.patch does not apply cleanly to Karakeep $TAG. Refresh it with scripts/refresh-patch.sh (see README)."
+            exit 1
+          fi
+          git apply ../build/patches/masonry.patch
+          git status --short
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
+        with:
+          package_json_file: karakeep/package.json
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.18.1
+
+      # Catches a patch that still applies but no longer fits the new code
+      - name: Type-check the patched web app
+        working-directory: karakeep
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts --filter "@karakeep/web..."
+          pnpm --filter @karakeep/web typecheck
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
+        with:
+          context: karakeep
+          file: karakeep/docker/Dockerfile
+          target: aio
+          platforms: linux/amd64
+          build-args: SERVER_VERSION=${{ needs.resolve.outputs.version }}
+          push: true
+          tags: ${{ needs.resolve.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.title=karakeep-masonry
+            org.opencontainers.image.description=Karakeep ${{ needs.resolve.outputs.version }} with Pinterest-style masonry cards
+            org.opencontainers.image.version=${{ needs.resolve.outputs.version }}
+          cache-from: type=gha,scope=aio-amd64
+          cache-to: type=gha,scope=aio-amd64,mode=max
+
+      - name: Summary
+        env:
+          TAGS: ${{ needs.resolve.outputs.tags }}
+        run: |
+          {
+            echo "### Published"
+            for t in ${TAGS//,/ }; do echo "- \`$t\`"; done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  keepalive:
+    # GitHub pauses scheduled workflows in public repos after 60 days without
+    # repository activity. Re-enabling the workflow through the API on each
+    # scheduled run is meant to keep the daily check from being paused.
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Keep the schedule enabled
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/$GITHUB_REPOSITORY/actions/workflows/build.yml/enable"
