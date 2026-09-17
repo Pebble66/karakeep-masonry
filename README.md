@@ -53,8 +53,9 @@ The code change itself is edited on the `masonry` branch of
    Karakeep app's settings. Leave the volumes, environment, Chrome and
    Meilisearch as they are.
 
-The package must be public for the server to pull it without logging in
-(one-time: Package settings → Change visibility → Public).
+The image is public (it follows this repo's visibility), so the server can
+pull it without logging in. If a pull ever asks for credentials, check the
+package's visibility under Package settings.
 
 ## Updating
 
