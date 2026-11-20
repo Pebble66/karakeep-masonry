@@ -1,16 +1,17 @@
 diff --git a/apps/web/components/dashboard/bookmarks/AssetCard.tsx b/apps/web/components/dashboard/bookmarks/AssetCard.tsx
-index 713bdd9a..1840a9e1 100644
+index 94dfa69e..3cad750c 100644
 --- a/apps/web/components/dashboard/bookmarks/AssetCard.tsx
 +++ b/apps/web/components/dashboard/bookmarks/AssetCard.tsx
-@@ -9,30 +9,41 @@ import type { ZBookmarkTypeAsset } from "@karakeep/shared/types/bookmarks";
- import { getAssetUrl } from "@karakeep/shared/utils/assetUtils";
- import { getSourceUrl } from "@karakeep/shared/utils/bookmarkUtils";
+@@ -15,16 +15,22 @@ import {
+   getSourceUrl,
+ } from "@karakeep/shared/utils/bookmarkUtils";
  
 -import { BookmarkLayoutAdaptingCard } from "./BookmarkLayoutAdaptingCard";
 +import {
 +  BookmarkLayoutAdaptingCard,
 +  MasonryImage,
 +} from "./BookmarkLayoutAdaptingCard";
+ import CardImage from "./CardImage";
  import FooterLinkURL from "./FooterLinkURL";
  
  function AssetImage({
@@ -20,62 +21,46 @@ index 713bdd9a..1840a9e1 100644
  }: {
    bookmark: ZBookmarkTypeAsset;
    className?: string;
++  // Shown at its natural shape, see MasonryImage
 +  masonry?: boolean;
  }) {
    const bookmarkedAsset = bookmark.content;
-+  const renderImage = (src: string) =>
-+    masonry ? (
-+      <Link href={`/dashboard/preview/${bookmark.id}`} className="block">
-+        <MasonryImage alt="asset" src={src} />
-+      </Link>
-+    ) : (
-+      <Link href={`/dashboard/preview/${bookmark.id}`}>
-+        <Image
-+          alt="asset"
-+          src={src}
-+          fill={true}
-+          unoptimized
-+          className={className}
-+        />
-+      </Link>
-+    );
+   const { imageFit } = useBookmarkDisplaySettings();
+@@ -32,8 +38,21 @@ function AssetImage({
+   const [failedScreenshotId, setFailedScreenshotId] = useState<string | null>(
+     null,
+   );
++  const masonryImage = (src: string, onError?: () => void) => (
++    <Link
++      href={`/dashboard/preview/${bookmark.id}`}
++      tabIndex={-1}
++      aria-hidden
++      className="block"
++    >
++      <MasonryImage alt="asset" src={src} onError={onError} />
++    </Link>
++  );
    switch (bookmarkedAsset.assetType) {
      case "image": {
--      return (
--        <Link href={`/dashboard/preview/${bookmark.id}`}>
--          <Image
--            alt="asset"
--            src={getAssetUrl(bookmarkedAsset.assetId)}
--            fill={true}
--            unoptimized
--            className={className}
--          />
--        </Link>
--      );
-+      return renderImage(getAssetUrl(bookmarkedAsset.assetId));
-     }
-     case "pdf": {
-       const screenshotAssetId = bookmark.assets.find(
-@@ -48,17 +59,7 @@ function AssetImage({
-           </div>
++      if (masonry) {
++        return masonryImage(getAssetUrl(bookmarkedAsset.assetId));
++      }
+       return (
+         // The title goes to the same place
+         <Link
+@@ -71,6 +90,11 @@ function AssetImage({
+           </Link>
          );
        }
--      return (
--        <Link href={`/dashboard/preview/${bookmark.id}`}>
--          <Image
--            alt="asset"
--            src={getAssetUrl(screenshotAssetId)}
--            fill={true}
--            unoptimized
--            className={className}
--          />
--        </Link>
--      );
-+      return renderImage(getAssetUrl(screenshotAssetId));
-     }
-     default: {
-       const _exhaustiveCheck: never = bookmarkedAsset.assetType;
-@@ -88,11 +89,19 @@ export default function AssetCard({
++      if (masonry) {
++        return masonryImage(getAssetUrl(screenshotAssetId), () =>
++          setFailedScreenshotId(screenshotAssetId),
++        );
++      }
+       return (
+         <Link
+           href={`/dashboard/preview/${bookmark.id}`}
+@@ -123,11 +147,19 @@ export default function AssetCard({
        className={className}
        bookmarkIndex={bookmarkIndex}
        wrapTags={true}
@@ -101,19 +86,20 @@ index 713bdd9a..1840a9e1 100644
    );
  }
 diff --git a/apps/web/components/dashboard/bookmarks/BookmarkLayoutAdaptingCard.tsx b/apps/web/components/dashboard/bookmarks/BookmarkLayoutAdaptingCard.tsx
-index d4cb34ec..b65f0a7b 100644
+index a5e12413..807ca0fc 100644
 --- a/apps/web/components/dashboard/bookmarks/BookmarkLayoutAdaptingCard.tsx
 +++ b/apps/web/components/dashboard/bookmarks/BookmarkLayoutAdaptingCard.tsx
-@@ -2,7 +2,7 @@
+@@ -2,7 +2,8 @@
  
  import type { BookmarksLayoutTypes } from "@/lib/userLocalSettings/types";
  import type { ReactNode } from "react";
 -import { useCallback } from "react";
 +import { useCallback, useState } from "react";
- import Image from "next/image";
++import Image from "next/image";
  import Link from "next/link";
- import { useSession } from "@/lib/auth/client";
-@@ -429,6 +429,109 @@ function GridView({
+ import { ButtonWithTooltip } from "@/components/ui/button";
+ import {
+@@ -744,6 +745,139 @@ function GridView({
    );
  }
  
@@ -122,7 +108,15 @@ index d4cb34ec..b65f0a7b 100644
 + * is capped at twice the card width (the container is set up in
 + * `MasonryView`), cropping the bottom of very tall images.
 + */
-+export function MasonryImage({ src, alt }: { src: string; alt: string }) {
++export function MasonryImage({
++  src,
++  alt,
++  onError,
++}: {
++  src: string;
++  alt: string;
++  onError?: () => void;
++}) {
 +  const [loaded, setLoaded] = useState(false);
 +  return (
 +    <Image
@@ -133,6 +127,7 @@ index d4cb34ec..b65f0a7b 100644
 +      unoptimized
 +      sizes="100vw"
 +      onLoad={() => setLoaded(true)}
++      onError={onError}
 +      className={cn(
 +        "block h-auto max-h-[200cqw] w-full object-cover object-top",
 +        // Reserve some space until the image's real size is known
@@ -142,6 +137,7 @@ index d4cb34ec..b65f0a7b 100644
 +  );
 +}
 +
++/** The card's menu (and preview button), sitting on the image's bottom corner. */
 +function MasonryImageActions({ bookmark }: { bookmark: ZBookmark }) {
 +  const isBulkEditEnabled = useBulkActionsStore(
 +    (state) => state.isBulkEditEnabled,
@@ -151,69 +147,89 @@ index d4cb34ec..b65f0a7b 100644
 +  return (
 +    <div
 +      className={cn(
-+        "absolute bottom-2 right-2 z-[60] rounded bg-white/50 backdrop-blur-sm transition-opacity duration-200 dark:bg-black/50 [&>div]:text-foreground",
++        "absolute bottom-1.5 right-1.5 z-[60] rounded-md transition-opacity duration-200",
++        TOOLBAR_TILE_CLASS,
 +        // Only shown on hover when there's a mouse (always visible on touch
 +        // screens), and kept visible while the options menu is open.
-+        "group-hover:opacity-100 has-[[data-state=open]]:opacity-100 [@media(pointer:fine)]:opacity-0",
++        "group-focus-within:opacity-100 group-hover:opacity-100 has-[[data-state=open]]:opacity-100 [@media(pointer:fine)]:opacity-0",
 +      )}
 +    >
-+      <BookmarkActionBar bookmark={bookmark} favouritedClassName="hidden" />
++      <BookmarkActionBar bookmark={bookmark} hideFavourite />
 +    </div>
 +  );
 +}
 +
++/**
++ * Pinterest-style cards: the image at its natural shape, with the title, note
++ * and tags below it only when they're turned on. Cards without a real image
++ * (notes, links with nothing to show) keep the regular card look.
++ */
 +function MasonryView(props: Props) {
-+  const { bookmark, image, title, className, wrapTags, bookmarkIndex } = props;
++  const {
++    bookmark,
++    image,
++    imageIsPlaceholder,
++    title,
++    className,
++    wrapTags,
++    bookmarkIndex,
++  } = props;
 +  const { showNotes, showTags, showTitle } = useBookmarkDisplaySettings();
 +  // The class name sizes placeholders that have no natural size of their own
-+  const img = image("masonry", "aspect-[4/3] w-full");
++  const img = imageIsPlaceholder
++    ? null
++    : image("masonry", "aspect-[4/3] w-full");
 +
 +  if (!img) {
-+    // Cards without an image (e.g. notes) keep the regular card look, sized
-+    // to their content.
-+    return (
-+      <GridView {...props} layout="masonry" fitHeight image={() => null} />
-+    );
++    return <GridView layout="masonry" {...props} />;
 +  }
 +
 +  const note = showNotes ? bookmark.note?.trim() : undefined;
-+  const titleVisible = showTitle && !!title;
-+  const tagsVisible =
-+    showTags && (bookmark.tags.length > 0 || isBookmarkStillTagging(bookmark));
++  const hasTitleLink = showTitle && !!title;
++  const isTagging = isBookmarkStillTagging(bookmark);
++  const tagsVisible = showTags && (bookmark.tags.length > 0 || isTagging);
 +
 +  return (
 +    <div
 +      className={cn(
-+        "group relative flex flex-col overflow-hidden rounded-lg",
++        "group relative isolate flex flex-col overflow-hidden rounded-lg",
 +        className,
 +      )}
 +      data-bookmark-index={bookmarkIndex}
 +    >
 +      <BulkEditSelectionOverlay bookmark={bookmark} />
-+      <OwnerIndicator bookmark={bookmark} />
-+      <DragHandle bookmark={bookmark} className="left-2 top-2" />
-+      <HoverActionBar bookmark={bookmark} />
++      <OwnerIndicator bookmark={bookmark} className="left-2 top-2" />
++      {!hasTitleLink && <KeyboardPreviewLink bookmark={bookmark} />}
++      <CardToolbar bookmark={bookmark} />
 +      <div className="relative w-full [container-type:inline-size]">
 +        {img}
 +        <MasonryImageActions bookmark={bookmark} />
 +      </div>
-+      {(titleVisible || note || tagsVisible) && (
-+        <div className="flex flex-col gap-2 overflow-hidden p-2">
-+          {titleVisible && (
-+            <div className="line-clamp-2 overflow-hidden text-ellipsis break-words text-lg">
-+              {title}
-+            </div>
-+          )}
-+          {note && <NotePreview note={note} bookmarkId={bookmark.id} />}
-+          {tagsVisible && (
-+            <div className="flex flex-wrap gap-1 overflow-hidden">
-+              <TagList
-+                className={wrapTags ? undefined : "h-full"}
-+                bookmark={bookmark}
-+                loading={isBookmarkStillTagging(bookmark)}
-+              />
-+            </div>
-+          )}
++      {(hasTitleLink || note || tagsVisible) && (
++        <div className="p-3">
++          <div
++            className={cn(
++              "flex flex-col gap-2 overflow-hidden",
++              CARD_TAG_ROW_PARENT_CLASS,
++            )}
++          >
++            {hasTitleLink && <div className={CARD_TITLE_CLASS}>{title}</div>}
++            {note && <NotePreview note={note} bookmarkId={bookmark.id} />}
++            {tagsVisible && (
++              <div
++                className={cn(
++                  "flex max-h-[3.25rem] shrink-0 flex-wrap gap-1 overflow-hidden",
++                  CARD_TAG_ROW_CLASS,
++                )}
++              >
++                <TagList
++                  className={wrapTags ? undefined : "h-full"}
++                  bookmark={bookmark}
++                  loading={isTagging}
++                />
++              </div>
++            )}
++          </div>
 +        </div>
 +      )}
 +    </div>
@@ -223,7 +239,7 @@ index d4cb34ec..b65f0a7b 100644
  function CompactView({
    bookmark,
    title,
-@@ -506,7 +609,7 @@ export function BookmarkLayoutAdaptingCard(props: Props) {
+@@ -837,7 +971,7 @@ export function BookmarkLayoutAdaptingCard(props: Props) {
    const layout = useBookmarkLayout();
  
    return bookmarkLayoutSwitch(layout, {
@@ -233,10 +249,10 @@ index d4cb34ec..b65f0a7b 100644
      list: <ListView {...props} />,
      compact: <CompactView {...props} />,
 diff --git a/apps/web/components/dashboard/bookmarks/BookmarksGridSkeleton.tsx b/apps/web/components/dashboard/bookmarks/BookmarksGridSkeleton.tsx
-index 9adc7b7a..335705bd 100644
+index 1a7981cf..c9dfdb3a 100644
 --- a/apps/web/components/dashboard/bookmarks/BookmarksGridSkeleton.tsx
 +++ b/apps/web/components/dashboard/bookmarks/BookmarksGridSkeleton.tsx
-@@ -28,6 +28,16 @@ function getBreakpointConfig(userColumns: number) {
+@@ -29,6 +29,16 @@ function getBreakpointConfig(userColumns: number) {
    return breakpointColumnsObj;
  }
  
@@ -250,31 +266,25 @@ index 9adc7b7a..335705bd 100644
 +  "h-64",
 +];
 +
- function BookmarkCardSkeleton({ height }: { height: string }) {
+ function GridCardSkeleton({ imageHeight }: { imageHeight: string }) {
    return (
-     <div className="mb-4 border border-border bg-card p-4">
-@@ -59,7 +69,7 @@ export default function BookmarksGridSkeleton({
-     <BookmarkCardSkeleton
-       key={i}
-       height={bookmarkLayoutSwitch(layout, {
--        masonry: "h-48",
-+        masonry: MASONRY_SKELETON_HEIGHTS[i % MASONRY_SKELETON_HEIGHTS.length],
-         grid: "h-48",
-         list: "h-32",
-         compact: "h-4",
+     <div className="mb-4 overflow-hidden rounded-lg border border-border bg-card">
+@@ -94,7 +104,9 @@ export default function BookmarksGridSkeleton({
+         {items.map((i) => (
+           <GridCardSkeleton
+             key={i}
+-            imageHeight="h-40 sm:h-[clamp(7rem,50cqw,14rem)]"
++            imageHeight={
++              MASONRY_SKELETON_HEIGHTS[i % MASONRY_SKELETON_HEIGHTS.length]
++            }
+           />
+         ))}
+       </Masonry>
 diff --git a/apps/web/components/dashboard/bookmarks/LinkCard.tsx b/apps/web/components/dashboard/bookmarks/LinkCard.tsx
-index 230baf02..8d11da77 100644
+index 7dd4fc04..78a66f06 100644
 --- a/apps/web/components/dashboard/bookmarks/LinkCard.tsx
 +++ b/apps/web/components/dashboard/bookmarks/LinkCard.tsx
-@@ -3,6 +3,7 @@
- import Image from "next/image";
- import Link from "next/link";
- import { useUserSettings } from "@/lib/userSettings";
-+import { cn } from "@/lib/utils";
- 
- import type { ZBookmarkTypeLink } from "@karakeep/shared/types/bookmarks";
- import {
-@@ -12,7 +13,10 @@ import {
+@@ -22,7 +22,10 @@ import {
    isBookmarkStillCrawling,
  } from "@karakeep/shared/utils/bookmarkUtils";
  
@@ -283,20 +293,10 @@ index 230baf02..8d11da77 100644
 +  BookmarkLayoutAdaptingCard,
 +  MasonryImage,
 +} from "./BookmarkLayoutAdaptingCard";
- import FooterLinkURL from "./FooterLinkURL";
- 
- const useOnClickUrl = (bookmark: ZBookmarkTypeLink) => {
-@@ -39,16 +43,50 @@ function LinkTitle({ bookmark }: { bookmark: ZBookmarkTypeLink }) {
-   );
- }
- 
-+function hasLinkImage(bookmark: ZBookmarkTypeLink) {
-+  return (
-+    isBookmarkStillCrawling(bookmark) ||
-+    getBookmarkLinkImageUrl(bookmark.content) !== null
-+  );
-+}
-+
+ import BookmarkFavicon from "./BookmarkFavicon";
+ import CardImage from "./CardImage";
+ import FooterLinkURL, { getDisplayDomain } from "./FooterLinkURL";
+@@ -61,9 +64,12 @@ function LinkTitle({ bookmark }: { bookmark: ZBookmarkTypeLink }) {
  function LinkImage({
    bookmark,
    className,
@@ -304,53 +304,52 @@ index 230baf02..8d11da77 100644
  }: {
    bookmark: ZBookmarkTypeLink;
    className?: string;
++  // Shown at its natural shape, see MasonryImage
 +  masonry?: boolean;
  }) {
    const { onClickUrl, urlTarget } = useOnClickUrl(bookmark);
-   const link = bookmark.content;
+   const { imageFit } = useBookmarkDisplaySettings();
+@@ -90,6 +96,28 @@ function LinkImage({
+   }
  
+   const imageDetails = getBookmarkLinkImageUrl(link);
++
 +  if (masonry) {
-+    const imageDetails = getBookmarkLinkImageUrl(link);
 +    return (
 +      <Link
 +        href={onClickUrl}
 +        target={urlTarget}
 +        rel="noreferrer"
++        // The title right below goes to the same place
++        tabIndex={-1}
++        aria-hidden
 +        className="block"
 +      >
 +        {isBookmarkStillCrawling(bookmark) || !imageDetails ? (
 +          <div className={cn("relative", className)}>
-+            <Image
-+              alt="card banner"
-+              fill={true}
-+              sizes="33vw"
-+              src="/blur.avif"
-+            />
++            <Image alt="" fill sizes="33vw" src="/blur.avif" />
 +          </div>
 +        ) : (
-+          <MasonryImage alt="card banner" src={imageDetails.url} />
++          <MasonryImage alt="" src={imageDetails.url} />
 +        )}
 +      </Link>
 +    );
 +  }
-+
-   const imgComponent = (url: string, unoptimized: boolean) => (
-     <Image
-       unoptimized={unoptimized}
-@@ -102,9 +140,13 @@ export default function LinkCard({
-       footer={<FooterLinkURL url={getSourceUrl(bookmarkLink)} />}
+   // The middle of a page is a fragment of text, the top is what it looks like
+   const isScreenshot = !link.imageAssetId && !!link.screenshotAssetId;
+   const isCroppedScreenshot = isScreenshot && imageFit === "cover";
+@@ -164,8 +192,12 @@ export default function LinkCard({
        bookmark={bookmarkLink}
        wrapTags={false}
+       imageIsPlaceholder={hasNoImage(bookmarkLink)}
 -      image={(_layout, className) => (
 -        <LinkImage className={className} bookmark={bookmarkLink} />
--      )}
-+      image={(layout, className) =>
-+        layout !== "masonry" ? (
-+          <LinkImage className={className} bookmark={bookmarkLink} />
-+        ) : hasLinkImage(bookmarkLink) ? (
-+          <LinkImage className={className} bookmark={bookmarkLink} masonry />
-+        ) : null
-+      }
++      image={(layout, className) => (
++        <LinkImage
++          className={className}
++          bookmark={bookmarkLink}
++          masonry={layout === "masonry"}
++        />
+       )}
        className={className}
        bookmarkIndex={bookmarkIndex}
-     />

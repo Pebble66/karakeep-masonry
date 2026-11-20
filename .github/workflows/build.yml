@@ -56,10 +56,16 @@ jobs:
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || version="${tag#v}"
 
           image="ghcr.io/${OWNER,,}/karakeep-masonry"
-          tags="$image:$version"
-          # Only move the "release" tag when building the newest release
-          if [[ "$tag" == "$latest_tag" ]]; then
-            tags+=",$image:release"
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            # A run from any other branch is a trial build: it only gets test
+            # tags, so servers on "release" or a version tag are untouched
+            tags="$image:$version-test,$image:test"
+          else
+            tags="$image:$version"
+            # Only move the "release" tag when building the newest release
+            if [[ "$tag" == "$latest_tag" ]]; then
+              tags+=",$image:release"
+            fi
           fi
 
           {
@@ -82,7 +88,7 @@ jobs:
         env:
           IMAGE: ${{ steps.release.outputs.image }}
           VERSION: ${{ steps.release.outputs.version }}
-          ALWAYS_BUILD: ${{ github.event_name == 'push' || inputs.force == true }}
+          ALWAYS_BUILD: ${{ github.event_name == 'push' || inputs.force == true || github.ref != 'refs/heads/main' }}
         run: |
           if [[ "$ALWAYS_BUILD" != "true" ]] && docker manifest inspect "$IMAGE:$VERSION" > /dev/null 2>&1; then
             echo "$IMAGE:$VERSION already exists, nothing to do."

@@ -102,6 +102,21 @@ gh workflow run build.yml -f tag=v0.33.2 -f force=true   # rebuild a version
 gh run watch
 ```
 
+## Testing a patch before it goes live
+
+Commit the new patch on a branch other than `main` and run the workflow on
+that branch:
+
+```sh
+gh workflow run build.yml --ref my-branch
+```
+
+A build from any branch other than `main` is only tagged `test` and
+`<version>-test` (e.g. `0.35.0-test`), never `release` or a plain version, so
+servers using those tags are left alone. Point a server at
+`ghcr.io/pebble66/karakeep-masonry:test` to try it, then merge the branch into
+`main`, which builds and publishes the real tags.
+
 ## Changing the masonry look
 
 1. In the fork, check out `masonry` and edit the files under
