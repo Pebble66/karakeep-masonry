@@ -35,8 +35,8 @@ publishes a release  ───────►  daily check finds it
 - `scripts/refresh-patch.sh`: moves the change onto a newer release when the
   patch stops applying.
 
-The code change itself is edited on the `masonry` branch of
-[Pebble66/karakeepin](https://github.com/Pebble66/karakeepin).
+`patches/masonry.patch` is the only copy of the change. Nothing else (such as
+a fork of Karakeep) needs to be kept up to date.
 
 ## Switching a server to this image
 
@@ -68,20 +68,25 @@ official release.
 
 GitHub emails you when a scheduled run fails. The usual cause is an official
 release that changed the same lines as the patch; your server keeps running
-the last good image in the meantime. To fix it, with the fork checked out
-next to this repo (`../karakeepin`):
+the last good image in the meantime.
+
+The easiest fix is to ask Claude, in any session on this repository: "The
+build is failing for Karakeep vX.Y.Z, please rework the patch on a branch and
+give me a test build." Or by hand, on a branch of this repo:
 
 ```sh
-scripts/refresh-patch.sh           # moves the change onto the latest release
-# If it reports a conflict: fix the files, `git add` them,
-# `git rebase --continue` in the fork, then run the script again.
-git diff                           # review the new patch
-scripts/refresh-patch.sh --push    # or commit and push yourself
+git switch -c refresh                # work on a branch, not main
+scripts/refresh-patch.sh             # moves the change onto the latest release
+# If it reports a conflict: fix the files it names (in .work/karakeep),
+# `git add` them, `git rebase --continue` there, then run the script again.
+git diff                             # review the new patch
+scripts/refresh-patch.sh --push      # commits and pushes the branch
+gh workflow run build.yml --ref refresh   # test build, see below
 ```
 
-Pushing a changed patch starts a build. The script needs `git` and the
-GitHub CLI (`gh`). If the fork has no local `masonry` branch (for example,
-a fresh clone), the script recreates it from the saved patch.
+The script needs `git` and the GitHub CLI (`gh`). It downloads Karakeep into
+`.work/karakeep` (ignored by git) and rebuilds the change there from the saved
+patch each time, so it works the same on any computer or session.
 
 If an urgent official release (such as a security fix) arrives before the
 patch is fixed, point the server at the official image of that version;
@@ -119,9 +124,13 @@ servers using those tags are left alone. Point a server at
 
 ## Changing the masonry look
 
-1. In the fork, check out `masonry` and edit the files under
-   `apps/web/components/dashboard/bookmarks/`.
-2. Run the web app locally (Node 24.18.1 and pnpm; see the fork's
-   development docs) and check the result.
-3. Commit on `masonry`, then run `scripts/refresh-patch.sh --push` here to
-   export and publish the new patch.
+The easiest way is to ask Claude to change the patch and give you a test
+build (see above). By hand:
+
+1. Run `scripts/refresh-patch.sh` once. `.work/karakeep` then holds Karakeep
+   with the change applied, on a branch called `masonry`.
+2. Edit the files under `apps/web/components/dashboard/bookmarks/` there, and
+   commit them on `masonry` (`git commit --amend` keeps it as one commit).
+3. Export the patch from it, on a branch of this repo:
+   `git -C .work/karakeep diff --no-color "$(cat patches/BASE_TAG)" masonry -- apps/web > patches/masonry.patch`
+4. Commit, push the branch and start a test build.
